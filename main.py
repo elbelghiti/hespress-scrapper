@@ -7,7 +7,7 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import execute_values
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import date, datetime
 from dotenv import load_dotenv
 import dateparser
 
@@ -128,9 +128,9 @@ def insert_article(article_data):
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(insert_query, article_data)
             conn.commit()
-        logger.info(f"Inserted article: {article_data.get('article_url')}")
+        logger.info(f"Inserted article: PostID: {article_data.get('postid')} - Date: {article_data.get('date')}")
     except Exception as e:
-        logger.error(f"Error inserting article {article_data.get('article_url')}: {e}", exc_info=True)
+        logger.error(f"Error inserting article PostID: {article_data.get('postid')} - Date: {article_data.get('date')}: {e}", exc_info=True)
 
 # ------------------------------------------------------------------------------
 # Parsing functions
@@ -295,6 +295,9 @@ def scrape_hespress(start_page=40167, end_page=40160):
       - For each article, parse details and insert into DB.
     """
     create_table()
+
+    # Track how many articles (links) we fetched across all pages
+    total_articles_fetched = 0
     
     # If end_page is larger, we invert the step
     step = -1 if start_page > end_page else 1
@@ -305,6 +308,9 @@ def scrape_hespress(start_page=40167, end_page=40160):
         if not articles_summaries:
             logger.info(f"No articles found on page {page_num}")
             continue
+
+        # Add the number of articles returned by parse_listing_page to the total
+        total_articles_fetched += len(articles_summaries)
         
         # Process each article on this page
         for summary in articles_summaries:
@@ -337,11 +343,17 @@ def scrape_hespress(start_page=40167, end_page=40160):
             time.sleep(0.5)
         
         # OPTIONAL: delay between pages
-        time.sleep(2)
+        time.sleep(1)
 
+    logger.info(f"Total articles (links) fetched: {total_articles_fetched}")
+    print(f"Total articles (links) fetched: {total_articles_fetched}")
 
 if __name__ == "__main__":
     # Example usage: scrape pages backward from 40167 down to 40160
     logger.info("Starting Hespress scraping...")
-    scrape_hespress(start_page=40167, end_page=40160)
-    logger.info("Scraping completed.")
+    start_time = time.time()
+    scrape_hespress(start_page=40167, end_page=35000)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.info(f"Scraping completed in {elapsed_time:.2f} seconds.")
+    print(f"Scraping completed in {elapsed_time:.2f} seconds.")
