@@ -1,0 +1,8 @@
+beautifulsoup4==4.12.3
+# pyodbc==5.2.0
+python-dotenv==1.0.1
+requests==2.32.3
+# selenium==4.26.1
+# psutil==6.1.0
+psycopg2-binary==2.9.10
+dateparser==1.2.0

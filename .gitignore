@@ -1,0 +1,8 @@
+images
+.venv
+.DS_Store
+.env
+*.csv
+*.html
+chromedriver*
+logs/*
