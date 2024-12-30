@@ -66,6 +66,24 @@ def normalize_moroccan_months(date_text: str) -> str:
     return date_text
 
 # ------------------------------------------------------------------------------
+# Helper: extract post ID from URL
+# ------------------------------------------------------------------------------
+def extract_post_id_from_url(article_url: str) -> str:
+    """
+    Extract the numeric post ID from a Hespress article URL. 
+    For example: 
+      https://www.hespress.com/...-66055.html 
+    should return "66055".
+    """
+    # This regex will capture digits between a hyphen and .html
+    # Adjust if your URLs have a different pattern.
+    match = re.search(r"-([\d]+)\.html$", article_url)
+    if match:
+        return match.group(1)
+    else:
+        return ""
+
+# ------------------------------------------------------------------------------
 # Database setup
 # ------------------------------------------------------------------------------
 def get_connection():
@@ -82,19 +100,20 @@ def get_connection():
 def create_table():
     """
     Creates the table (hespress_articles) if it doesn't already exist.
+    We'll use postid as a UNIQUE key.
     """
     create_table_query = """
     CREATE TABLE IF NOT EXISTS hespress_articles (
         id SERIAL PRIMARY KEY,
-        date TIMESTAMP,           -- store parsed date/time
+        postid TEXT UNIQUE,       -- store extracted post ID, unique
+        article_url TEXT UNIQUE,         -- store the original URL for reference
+        date TIMESTAMP,           -- parsed date/time
         title TEXT,
         category TEXT,
-        date_text_ar TEXT,        -- store raw Arabic date
+        date_text_ar TEXT,        -- raw Arabic date
         author TEXT,
-        article_url TEXT UNIQUE,
         content TEXT,
         featured_image TEXT,
-        postid TEXT,              -- store extracted post ID
         tags TEXT[],
         created_at TIMESTAMP DEFAULT now()
     );
@@ -107,22 +126,37 @@ def create_table():
     except Exception as e:
         logger.error(f"Error creating table: {e}", exc_info=True)
 
+def article_exists(postid: str) -> bool:
+    """
+    Checks if an article with the given post ID already exists in the DB.
+    Returns True if it exists, otherwise False.
+    """
+    if not postid:
+        return False  # If there's no valid postid, treat as not found.
+    try:
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM hespress_articles WHERE postid = %s LIMIT 1", (postid,))
+            return cur.fetchone() is not None
+    except Exception as e:
+        logger.error(f"Error checking existence for postid={postid}: {e}", exc_info=True)
+        return False
+
 def insert_article(article_data):
     """
     Insert a single article into the database.
-    Uses ON CONFLICT (article_url) to skip duplicates.
+    Uses ON CONFLICT (postid) to skip duplicates.
     article_data is a dict with keys matching the DB columns.
     """
     insert_query = """
     INSERT INTO hespress_articles (
-        article_url, category, title, date_text_ar, date,
-        author, content, featured_image, tags, postid
+        postid, article_url, category, title, date_text_ar, date,
+        author, content, featured_image, tags
     )
     VALUES (
-        %(article_url)s, %(category)s, %(title)s, %(date_text_ar)s, %(date)s,
-        %(author)s, %(content)s, %(featured_image)s, %(tags)s, %(postid)s
+        %(postid)s, %(article_url)s, %(category)s, %(title)s, %(date_text_ar)s, %(date)s,
+        %(author)s, %(content)s, %(featured_image)s, %(tags)s
     )
-    ON CONFLICT (article_url) DO NOTHING;
+    ON CONFLICT (postid) DO NOTHING;
     """
     try:
         with get_connection() as conn, conn.cursor() as cur:
@@ -138,7 +172,7 @@ def insert_article(article_data):
 def parse_listing_page(page_number):
     """
     Fetches one listing page (the 'ajax_listing' HTML).
-    Returns a list of dicts: {article_url, category, title, date_text_ar}.
+    Returns a list of dicts: {postid, article_url, category, title, date_text_ar}.
     """
     url = f"https://www.hespress.com/?action=ajax_listing&paged={page_number}"
     logger.info(f"Fetching listing page: {url}")
@@ -181,7 +215,11 @@ def parse_listing_page(page_number):
         if not article_url:
             continue
         
+        # Extract postid from the link:
+        postid = extract_post_id_from_url(article_url)
+        
         results.append({
+            "postid": postid,
             "article_url": article_url,
             "category": category,
             "title": article_title,
@@ -192,13 +230,13 @@ def parse_listing_page(page_number):
 def parse_article_content(article_url):
     """
     Fetches a full article page and parses:
-      - postid (from <article id="post-XXXX">)
       - author
       - main content (article body)
       - featured image URL
       - tags
-      - date from the <span class="date-post"> (we still keep the listing date too)
-    Returns a dict that complements the summary data.
+      - date from the <span class="date-post">
+    Returns a dict with those fields. (We skip extracting the postid here 
+    because we're already extracting it from the URL.)
     """
     logger.info(f"Fetching article: {article_url}")
     
@@ -219,15 +257,6 @@ def parse_article_content(article_url):
     
     soup = BeautifulSoup(resp.text, "html.parser")
     
-    # Extract post ID from the <article id="post-XXXX">
-    postid = None
-    article_tag = soup.find("article", id=re.compile(r"^post-\d+"))
-    if article_tag:
-        # The id attribute looks like: post-1488434
-        match = re.match(r"post-(\d+)", article_tag.get("id", ""))
-        if match:
-            postid = match.group(1)  # e.g., 1488434
-    
     # Main content
     article_content_div = soup.find("div", class_="article-content")
     content_text = ""
@@ -243,7 +272,7 @@ def parse_article_content(article_url):
     if author_span and author_span.find("a"):
         author_name = author_span.find("a").get_text(strip=True)
     
-    # Some articles also place the date here <span class="date-post">...<span>
+    # Some articles place the date here <span class="date-post">...<span>
     date_post_span = soup.find("span", class_="date-post")
     date_text_ar = date_post_span.get_text(strip=True) if date_post_span else ""
 
@@ -262,7 +291,6 @@ def parse_article_content(article_url):
             tags.append(t.get_text(strip=True))
     
     return {
-        "postid": postid,
         "author": author_name,
         "content": content_text,
         "featured_image": featured_image,
@@ -292,7 +320,7 @@ def scrape_hespress(start_page=40167, end_page=40160):
       - Ensures the DB table is created.
       - Loops backward from start_page to end_page.
       - For each listing page, parse summary articles.
-      - For each article, parse details and insert into DB.
+      - For each article, check if postid exists, parse details if not, then insert into DB.
     """
     create_table()
 
@@ -314,10 +342,20 @@ def scrape_hespress(start_page=40167, end_page=40160):
         
         # Process each article on this page
         for summary in articles_summaries:
+            postid = summary["postid"]  # from the URL
+            
+            # ---------------------------------------------------------
+            # Check if postid is already in DB before parsing
+            # ---------------------------------------------------------
+            if article_exists(postid):
+                logger.info(f"Skipping article (already in DB): {postid} - {summary["article_url"]}")
+                continue
+            
             detail_data = parse_article_content(summary["article_url"])
             
-            # Priority for date_text_ar: the date from full article page if available,
-            # otherwise the date from the listing page
+            # Priority for date_text_ar: 
+            #   1) full article page if available, 
+            #   2) otherwise from the listing page
             date_text_ar = detail_data.get("date_text_ar") or summary["date_text_ar"]
             
             # Parse the Arabic date with dateparser (after normalization)
@@ -325,8 +363,8 @@ def scrape_hespress(start_page=40167, end_page=40160):
             
             # Combine data
             article_data = {
+                "postid": postid,
                 "article_url": summary["article_url"],
-                "postid": detail_data.get("postid"),
                 "category": summary["category"],
                 "title": summary["title"],
                 "date_text_ar": date_text_ar,  # raw Arabic date string
@@ -349,10 +387,10 @@ def scrape_hespress(start_page=40167, end_page=40160):
     print(f"Total articles (links) fetched: {total_articles_fetched}")
 
 if __name__ == "__main__":
-    # Example usage: scrape pages backward from 40167 down to 40160
+    # Example usage: scrape pages backward from 40167 down to 35000
     logger.info("Starting Hespress scraping...")
     start_time = time.time()
-    scrape_hespress(start_page=40167, end_page=35000)
+    scrape_hespress(start_page=35000, end_page=30000)
     end_time = time.time()
     elapsed_time = end_time - start_time
     logger.info(f"Scraping completed in {elapsed_time:.2f} seconds.")
