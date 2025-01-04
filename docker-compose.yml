@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+
+  scraper:
+    build: .
+    container_name: hespress_scraper
+    restart: unless-stopped
+    environment:
+      # Pass environment variables into the scraper container
+      DB_HOST: ${DB_HOST}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      
+    # If you want to mount a local logs folder:
+    volumes:
+      - ./logs:/app/logs
+    
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Add this line
+    
+    # By default, run the scraper. 
+    command: ["python", "scraper.py"]

@@ -8,7 +8,7 @@ from psycopg2 import sql
 from psycopg2.extras import execute_values
 from bs4 import BeautifulSoup
 from datetime import date, datetime
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import dateparser
 
 # ------------------------------------------------------------------------------
@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------------------
 # Load environment variables
 # ------------------------------------------------------------------------------
-load_dotenv()  # Reads .env file in current directory
-DB_HOST = os.getenv('DB_HOST', '127.0.0.1')
-DB_NAME = os.getenv('DB_NAME', 'hespress')
-DB_USER = os.getenv('DB_USER', 'admin')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'admin_password')
+# load_dotenv(override=True)  # Reads .env file in current directory
+DB_HOST = os.getenv('DB_HOST')
+DB_NAME = os.getenv('DB_NAME')
+DB_USER = os.getenv('DB_USER')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
 
 # ------------------------------------------------------------------------------
 # Moroccan month names map
@@ -90,6 +90,7 @@ def get_connection():
     """
     Returns a new psycopg2 connection to the PostgreSQL database using env vars.
     """
+    logger.info(f"Connected to database {DB_NAME} at host {DB_HOST}.")
     return psycopg2.connect(
         host=DB_HOST,
         dbname=DB_NAME,
@@ -348,7 +349,8 @@ def scrape_hespress(start_page=40167, end_page=40160):
             # Check if postid is already in DB before parsing
             # ---------------------------------------------------------
             if article_exists(postid):
-                logger.info(f"Skipping article (already in DB): {postid} - {summary["article_url"]}")
+                article_url = summary["article_url"]
+                logger.info(f"Skipping article (already in DB): {postid} - {article_url}")
                 continue
             
             detail_data = parse_article_content(summary["article_url"])
@@ -390,7 +392,7 @@ if __name__ == "__main__":
     # Example usage: scrape pages backward from 40167 down to 35000
     logger.info("Starting Hespress scraping...")
     start_time = time.time()
-    scrape_hespress(start_page=35000, end_page=30000)
+    scrape_hespress(start_page=5, end_page=1)
     end_time = time.time()
     elapsed_time = end_time - start_time
     logger.info(f"Scraping completed in {elapsed_time:.2f} seconds.")
