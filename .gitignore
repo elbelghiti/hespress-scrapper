@@ -6,3 +6,4 @@ images
 *.html
 chromedriver*
 logs/*
+db_backup/*
